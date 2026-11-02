@@ -1,26 +1,43 @@
 #!/usr/bin/env node
 "use strict";
 /* ================================================================== *
- *  Marzneshin  ·  Abasthan Edition                                    *
+ *  Marzneshin  ·  KataBump Edition                                    *
  *  ------------------------------------------------------------------ *
- *  Optimized for Abasthan PaaS (system Python preferred, lighter)     *
- *  Marzneshin panel + marznode + Xray-core behind ONE public port.    *
- *  Deployment = 2 files:  index.js + package.json                     *
+ *  Marzneshin panel + marznode + Xray-core, all behind ONE public      *
+ *  port.  Deployment = 2 files:  index.js + package.json               *
  *                                                                      *
- *  Prefer system python3. Falls back to portable only when needed.    *
+ *  Everything (Python runtime, panel source, dashboard, node, Xray,    *
+ *  certificates, admin account, inbounds, hosts, service, demo user)   *
+ *  is installed and wired automatically on the first start.            *
+ *                                                                      *
+ *  Layout (inside the KataBump server directory, persistent):          *
+ *    marzneshin/app            Marzneshin panel source                 *
+ *    marzneshin/app/dashboard  built dashboard (served at /dashboard)  *
+ *    marzneshin/node           marznode source                         *
+ *    marzneshin/venv           one virtualenv for panel + node         *
+ *    marzneshin/python         portable CPython (only when needed)     *
+ *    marzneshin/xray           Xray-core + geoip.dat/geosite.dat       *
+ *    marzneshin/certs          node cert/key + panel client cert       *
+ *    marzneshin/data           SQLite database (persistent!)           *
+ *    marzneshin/log            panel / node / xray logs                *
+ *    marzneshin/xray_config.json                                       *
+ *    marzneshin/state.json     boot state, ports, credentials          *
+ *    marzneshin/PANEL.txt      human readable credentials + links      *
+ *                                                                      *
+ *  Protocols published on the single public port:                      *
+ *    TLS/Reality  -> xray VLESS+Reality (Vision)   [byte sniffing]     *
+ *    h2c / gRPC   -> xray VLESS+gRPC               [PRI preface]       *
+ *    HTTP paths   -> xray VLESS/VMess/Trojan over WS+HTTPUpgrade       *
+ *    everything else (binary) -> xray Shadowsocks (catch-all)          *
+ *    remaining HTTP -> Marzneshin panel / API / subscriptions          *
  * ================================================================== */
 
 /* ----------------------------- bootstrap -------------------------- */
 
-/* Infynix / Pterodactyl memory compatibility:
-   The panel sets NODE_OPTIONS with a high max-old-space-size.
-   We only force a low limit if NODE_OPTIONS is not already set. */
 try {
-  if (!process.env.NODE_OPTIONS || !String(process.env.NODE_OPTIONS).includes("max-old-space-size")) {
-    require("v8").setFlagsFromString(
-      "--max-old-space-size=" + (process.env.MZ_NODE_HEAP_MB || 96)
-    );
-  }
+  require("v8").setFlagsFromString(
+    "--max-old-space-size=" + (process.env.MZ_NODE_HEAP_MB || 48)
+  );
 } catch (e) {}
 const gcNow = () => {
   if (typeof global.gc === "function") {
@@ -40,8 +57,8 @@ const { spawn, spawnSync } = require("child_process");
 
 /* ------------------------------ config ---------------------------- */
 
-const WRAPPER = "marzneshin-abasthan/1.2.0";
-const UA = "Mozilla/5.0 (compatible; marzneshin-abasthan/1.2)";
+const WRAPPER = "marzneshin-katabump/1.0.0";
+const UA = "Mozilla/5.0 (compatible; marzneshin-katabump/1.0)";
 
 /* pinned upstream versions (change here to upgrade) */
 const PANEL_REPO = "marzneshin/marzneshin";
@@ -718,10 +735,9 @@ async function pythonVersion(py) {
 }
 
 async function findSystemPython() {
-  // Abasthan / PaaS friendly: prefer real system Python first,
-  // only fall back to portable if nothing usable is found.
   const cands = [
     process.env.MZ_PYTHON,
+    path.join(PYROOT, "bin", "python3"),
     "python3.12",
     "python3.11",
     "python3.10",
@@ -729,21 +745,17 @@ async function findSystemPython() {
     "python",
     "/usr/bin/python3",
     "/usr/local/bin/python3",
-    path.join(PYROOT, "bin", "python3"), // portable last
   ].filter(Boolean);
-
   for (const c of cands) {
-    try {
-      const v = await pythonVersion(c);
-      if (!v) continue;
-      // Accept 3.10 – 3.13 (more tolerant for PaaS)
-      const okMinor = v.major === 3 && v.minor >= 10 && v.minor <= 13;
-      if (okMinor) {
-        ok("python " + v.text + "  (" + c + ")");
-        return c;
-      }
-    } catch (e) {
-      // ignore and try next
+    const v = await pythonVersion(c);
+    if (!v) continue;
+    const okMinor =
+      v.major === 3 &&
+      v.minor >= 11 &&
+      (v.minor <= 12 || process.env.MZ_ALLOW_PY313 === "1");
+    if (okMinor) {
+      ok("python " + v.text + "  (" + c + ")");
+      return c;
     }
   }
   return null;
@@ -769,68 +781,22 @@ function pbsUrl() {
 
 async function installPortablePython() {
   step("installing portable CPython " + PY_VERSION + " (one time, ~33 MB)");
+  const tgz = path.join(TMPD, "python.tgz");
+  await downloadFile(pbsUrl(), tgz, "python " + PY_VERSION);
+  await extractTarGz(tgz, PYROOT, 1);
   try {
-    // clean previous broken install
-    try {
-      fs.rmSync(PYROOT, { recursive: true, force: true });
-    } catch (e) {}
-    fs.mkdirSync(PYROOT, { recursive: true });
-    fs.mkdirSync(TMPD, { recursive: true });
-
-    const tgz = path.join(TMPD, "python.tgz");
-    await downloadFile(pbsUrl(), tgz, "python " + PY_VERSION);
-    await extractTarGz(tgz, PYROOT, 1);
-    try {
-      fs.unlinkSync(tgz);
-    } catch (e) {}
-
-    const py = path.join(PYROOT, "bin", "python3");
-    if (!exists(py)) {
-      // try to find any python binary inside the extracted tree
-      const found = findFileRecursive(PYROOT, "python3") || findFileRecursive(PYROOT, "python3.12");
-      if (found) {
-        ok("portable python found at " + found);
-        return found;
-      }
-      throw new Error("portable python extraction failed - binary not found after extract");
-    }
-
-    // make sure it's executable
-    try {
-      fs.chmodSync(py, 0o755);
-    } catch (e) {}
-
-    const v = await pythonVersion(py);
-    ok("portable python " + (v ? v.text : "?") + " ready");
-    return py;
-  } catch (err) {
-    throw new Error("portable python install failed: " + (err && err.message ? err.message : err));
-  }
-}
-
-function findFileRecursive(dir, name) {
-  try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const ent of entries) {
-      const full = path.join(dir, ent.name);
-      if (ent.isFile() && ent.name === name) return full;
-      if (ent.isDirectory()) {
-        const r = findFileRecursive(full, name);
-        if (r) return r;
-      }
-    }
+    fs.unlinkSync(tgz);
   } catch (e) {}
-  return null;
+  const py = path.join(PYROOT, "bin", "python3");
+  if (!exists(py)) throw new Error("portable python extraction failed");
+  const v = await pythonVersion(py);
+  ok("portable python " + (v ? v.text : "?") + " ready");
+  return py;
 }
 
 async function ensurePython() {
-  step("looking for system python...");
   const found = await findSystemPython();
-  if (found) {
-    ok("using system python: " + found);
-    return found;
-  }
-  warn("no usable system python found - trying portable CPython");
+  if (found) return found;
   return installPortablePython();
 }
 
@@ -2894,7 +2860,7 @@ async function main() {
   const t0 = Date.now();
   STATE.error = null;
   STATE.step = "booting";
-  console.log(paint("35", "\n  Marzneshin  ·  Abasthan Edition"));
+  console.log(paint("35", "\n  Marzneshin  ·  KataBump Edition"));
   console.log(
     paint("90", "  panel + marznode + xray on a single public port " + PUBLIC_PORT)
   );
