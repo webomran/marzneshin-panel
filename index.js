@@ -824,8 +824,13 @@ function findFileRecursive(dir, name) {
 }
 
 async function ensurePython() {
+  step("looking for system python...");
   const found = await findSystemPython();
-  if (found) return found;
+  if (found) {
+    ok("using system python: " + found);
+    return found;
+  }
+  warn("no usable system python found - trying portable CPython");
   return installPortablePython();
 }
 
@@ -2889,7 +2894,7 @@ async function main() {
   const t0 = Date.now();
   STATE.error = null;
   STATE.step = "booting";
-  console.log(paint("35", "\n  Marzneshin  ·  KataBump Edition"));
+  console.log(paint("35", "\n  Marzneshin  ·  Abasthan Edition"));
   console.log(
     paint("90", "  panel + marznode + xray on a single public port " + PUBLIC_PORT)
   );
