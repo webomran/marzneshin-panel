@@ -1,26 +1,14 @@
 {
-  "name": "marzneshin-katabump",
-  "version": "1.1.0",
+  "name": "marzneshin-abasthan",
+  "version": "1.2.0",
   "private": true,
-  "description": "Marzneshin panel + marznode + Xray-core on KataBump with ready-made configs for every protocol and every operator. Two files, zero npm dependencies.",
+  "description": "Lightweight Marzneshin bootstrap optimized for Abasthan PaaS",
   "main": "index.js",
   "scripts": {
-    "start": "node --max-old-space-size=64 --expose-gc index.js",
-    "selftest": "MZ_SELFTEST=1 node index.js",
-    "selftest:venv": "MZ_SELFTEST=2 node index.js"
+    "start": "node --max-old-space-size=128 index.js"
   },
   "engines": {
     "node": ">=18"
   },
-  "keywords": [
-    "marzneshin",
-    "marznode",
-    "xray",
-    "vless",
-    "reality",
-    "katabump",
-    "panel",
-    "config"
-  ],
   "license": "AGPL-3.0"
 }
