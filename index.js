@@ -1,41 +1,43 @@
 #!/usr/bin/env node
 "use strict";
 /* ================================================================== *
- *  Marzneshin  ·  Infynix Edition                                     *
+ *  Marzneshin  ·  KataBump Edition                                    *
  *  ------------------------------------------------------------------ *
- *  Optimized for Infynix free hosting (Pterodactyl + locked startup)  *
- *  Marzneshin panel + marznode + Xray-core behind ONE public port.    *
- *  Deployment = 2 files:  index.js + package.json                     *
+ *  Marzneshin panel + marznode + Xray-core, all behind ONE public      *
+ *  port.  Deployment = 2 files:  index.js + package.json               *
  *                                                                      *
- *  Everything (Python, panel, dashboard, node, Xray, certs, admin,    *
- *  inbounds, hosts, demo user) is installed automatically on first    *
- *  start.                                                             *
+ *  Everything (Python runtime, panel source, dashboard, node, Xray,    *
+ *  certificates, admin account, inbounds, hosts, service, demo user)   *
+ *  is installed and wired automatically on the first start.            *
  *                                                                      *
- *  Layout (persistent inside the server directory):                   *
- *    marzneshin/app            Marzneshin panel source                *
- *    marzneshin/app/dashboard  built dashboard (/dashboard)           *
- *    marzneshin/node           marznode source                        *
- *    marzneshin/venv           virtualenv for panel + node            *
- *    marzneshin/python         portable CPython (when needed)         *
- *    marzneshin/xray           Xray-core + geo files                  *
- *    marzneshin/certs          certificates                           *
- *    marzneshin/data           SQLite database (persistent)           *
- *    marzneshin/log            logs                                   *
- *    marzneshin/state.json     boot state + credentials               *
- *    marzneshin/PANEL.txt      human readable credentials + links     *
+ *  Layout (inside the KataBump server directory, persistent):          *
+ *    marzneshin/app            Marzneshin panel source                 *
+ *    marzneshin/app/dashboard  built dashboard (served at /dashboard)  *
+ *    marzneshin/node           marznode source                         *
+ *    marzneshin/venv           one virtualenv for panel + node         *
+ *    marzneshin/python         portable CPython (only when needed)     *
+ *    marzneshin/xray           Xray-core + geoip.dat/geosite.dat       *
+ *    marzneshin/certs          node cert/key + panel client cert       *
+ *    marzneshin/data           SQLite database (persistent!)           *
+ *    marzneshin/log            panel / node / xray logs                *
+ *    marzneshin/xray_config.json                                       *
+ *    marzneshin/state.json     boot state, ports, credentials          *
+ *    marzneshin/PANEL.txt      human readable credentials + links      *
+ *                                                                      *
+ *  Protocols published on the single public port:                      *
+ *    TLS/Reality  -> xray VLESS+Reality (Vision)   [byte sniffing]     *
+ *    h2c / gRPC   -> xray VLESS+gRPC               [PRI preface]       *
+ *    HTTP paths   -> xray VLESS/VMess/Trojan over WS+HTTPUpgrade       *
+ *    everything else (binary) -> xray Shadowsocks (catch-all)          *
+ *    remaining HTTP -> Marzneshin panel / API / subscriptions          *
  * ================================================================== */
 
 /* ----------------------------- bootstrap -------------------------- */
 
-/* Infynix / Pterodactyl memory compatibility:
-   The panel sets NODE_OPTIONS with a high max-old-space-size.
-   We only force a low limit if NODE_OPTIONS is not already set. */
 try {
-  if (!process.env.NODE_OPTIONS || !String(process.env.NODE_OPTIONS).includes("max-old-space-size")) {
-    require("v8").setFlagsFromString(
-      "--max-old-space-size=" + (process.env.MZ_NODE_HEAP_MB || 96)
-    );
-  }
+  require("v8").setFlagsFromString(
+    "--max-old-space-size=" + (process.env.MZ_NODE_HEAP_MB || 48)
+  );
 } catch (e) {}
 const gcNow = () => {
   if (typeof global.gc === "function") {
@@ -55,8 +57,8 @@ const { spawn, spawnSync } = require("child_process");
 
 /* ------------------------------ config ---------------------------- */
 
-const WRAPPER = "marzneshin-infynix/1.1.1";
-const UA = "Mozilla/5.0 (compatible; marzneshin-infynix/1.1)";
+const WRAPPER = "marzneshin-katabump/1.0.0";
+const UA = "Mozilla/5.0 (compatible; marzneshin-katabump/1.0)";
 
 /* pinned upstream versions (change here to upgrade) */
 const PANEL_REPO = "marzneshin/marzneshin";
