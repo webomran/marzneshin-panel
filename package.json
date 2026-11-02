@@ -1,0 +1,23 @@
+{
+  "name": "marzneshin-infynix",
+  "version": "1.1.1",
+  "private": true,
+  "description": "Marzneshin panel + marznode + Xray-core optimized for Infynix free hosting",
+  "main": "index.js",
+  "scripts": {
+    "start": "node --max-old-space-size=96 --expose-gc index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "marzneshin",
+    "marznode",
+    "xray",
+    "vless",
+    "reality",
+    "infynix",
+    "panel"
+  ],
+  "license": "AGPL-3.0"
+}
